@@ -54,7 +54,7 @@ export default function DataManagement() {
         <h3 className="text-lg font-semibold text-gray-800">Data Management</h3>
         <button
           onClick={() => setShowConfig(!showConfig)}
-          className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+          className="text-sm text-gray-800 hover:text-gray-900 flex items-center gap-1 font-medium"
         >
           <Settings className="w-4 h-4" />
           {showConfig ? 'Hide' : 'Show'} Config
@@ -64,7 +64,7 @@ export default function DataManagement() {
       {showConfig && (
         <div className="mb-4 p-4 bg-gray-50 rounded-md">
           <h4 className="text-sm font-semibold text-gray-700 mb-2">Paths to Clear:</h4>
-          <ul className="text-sm text-gray-600 space-y-1">
+          <ul className="text-sm text-gray-700 space-y-1">
             {config.paths.map((path, index) => (
               <li key={index} className="font-mono flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-gray-400" />
@@ -98,7 +98,7 @@ export default function DataManagement() {
         {loading ? 'Clearing Data...' : 'Clear All Persistence Data'}
       </button>
 
-      <p className="mt-3 text-xs text-gray-500 text-center">
+      <p className="mt-3 text-xs text-gray-700 text-center">
         This will remove all persistence directories and create fresh ones
       </p>
     </div>
