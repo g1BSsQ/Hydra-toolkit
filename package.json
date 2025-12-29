@@ -2,11 +2,13 @@
   "name": "hydra-toolkit",
   "version": "0.1.0",
   "private": true,
+  "description": "Hydra Head Protocol Toolkit for Cardano Layer 2 Development",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
