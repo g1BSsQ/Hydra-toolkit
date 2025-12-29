@@ -1,29 +1,33 @@
 export type HydraMessage = 
-  | { tag: 'Greetings'; me: any }
+  | { tag: 'Greetings'; me: any; headStatus?: string }
   | { tag: 'PeerConnected'; peer: string }
   | { tag: 'PeerDisconnected'; peer: string }
   | { tag: 'HeadIsInitializing'; parties: string[]; headId: string }
   | { tag: 'Committed'; party: string; utxo: any }
   | { tag: 'HeadIsOpen'; utxo: any; headId: string }
   | { tag: 'HeadIsClosed'; snapshotNumber: number; contestationDeadline: string }
+  | { tag: 'ReadyToFanout' }
   | { tag: 'HeadIsFinalized'; utxo: any }
   | { tag: 'HeadIsAborted'; utxo: any }
   | { tag: 'TxValid'; transactionId: string }
   | { tag: 'TxInvalid'; transactionId: string; validationError: any }
   | { tag: 'SnapshotConfirmed'; snapshot: any; signatures: any }
-  | { tag: 'GetUTxOResponse'; utxo: any }
-  | { tag: 'InvalidInput'; reason: string }
+  | { tag: 'DecommitRequested'; decommitTx: any; utxoToDecommit: any }
+  | { tag: 'DecommitApproved'; decommitTxId: string }
+  | { tag: 'DecommitFinalized'; decommitTxId: string }
+  | { tag: 'InvalidInput'; reason: string; input?: any }
   | { tag: 'CommandFailed'; clientInput: any };
 
 export type HydraCommand =
   | { tag: 'Init' }
   | { tag: 'Abort' }
-  | { tag: 'Commit'; utxo: any }
   | { tag: 'NewTx'; transaction: any }
-  | { tag: 'GetUTxO' }
   | { tag: 'Close' }
   | { tag: 'Contest'; snapshotNumber: number }
-  | { tag: 'Fanout' };
+  | { tag: 'Fanout' }
+  | { tag: 'Decommit'; decommitTx: any }
+  | { tag: 'Recover' }
+  | { tag: 'SideLoadSnapshot'; snapshot: any };
 
 export class HydraWebSocketClient {
   private ws: WebSocket | null = null;
@@ -101,16 +105,8 @@ export class HydraWebSocketClient {
     this.sendCommand({ tag: 'Abort' });
   }
 
-  commit(utxo: any) {
-    this.sendCommand({ tag: 'Commit', utxo });
-  }
-
   newTx(transaction: any) {
     this.sendCommand({ tag: 'NewTx', transaction });
-  }
-
-  getUTxO() {
-    this.sendCommand({ tag: 'GetUTxO' });
   }
 
   close() {
@@ -123,6 +119,14 @@ export class HydraWebSocketClient {
 
   fanout() {
     this.sendCommand({ tag: 'Fanout' });
+  }
+
+  decommit(decommitTx: any) {
+    this.sendCommand({ tag: 'Decommit', decommitTx });
+  }
+
+  recover() {
+    this.sendCommand({ tag: 'Recover' });
   }
 
   onMessage(handler: (message: HydraMessage) => void) {
