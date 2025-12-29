@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# credentials
+credentials/*.json
+credentials/*.vkey
+credentials/*.skey
+credentials/*.addr
+!credentials/README.md
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
