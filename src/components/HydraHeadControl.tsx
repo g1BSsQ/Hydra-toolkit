@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { HydraWebSocketClient, HydraMessage } from '@/lib/hydra-websocket';
-import { Send, Trash2, CheckCircle, XCircle, Activity, Plug, PlugZap } from 'lucide-react';
+import { Send, Trash2, CheckCircle, XCircle, Activity } from 'lucide-react';
 
 interface HydraHeadControlProps {
   nodeId: 'alice' | 'bob';
@@ -14,10 +14,13 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
   const [messages, setMessages] = useState<HydraMessage[]>([]);
   const [headState, setHeadState] = useState<string>('Idle');
   const [customCommand, setCustomCommand] = useState('');
-  const [autoConnect, setAutoConnect] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [hasCommitted, setHasCommitted] = useState(false);
+  const [hasClosed, setHasClosed] = useState(false);
   const clientRef = useRef<HydraWebSocketClient | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const connectToNode = () => {
     if (clientRef.current?.isConnected()) {
@@ -36,14 +39,21 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
 
     const unsubscribeConnection = client.onConnectionChange((isConnected) => {
       setConnected(isConnected);
-      if (!isConnected && autoConnect) {
-        setConnectionError(`Unable to connect to ${nodeId} node. Make sure the node is running.`);
+      if (!isConnected) {
+        // Auto-reconnect after 3 seconds
+        reconnectTimerRef.current = setTimeout(() => {
+          console.log(`[${nodeId}] Attempting to reconnect...`);
+          connectToNode();
+        }, 3000);
       }
     });
 
     client.connect();
 
     return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
       unsubscribeMessage();
       unsubscribeConnection();
       client.disconnect();
@@ -51,20 +61,22 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
   };
 
   const disconnectFromNode = () => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (clientRef.current) {
       clientRef.current.disconnect();
       clientRef.current = null;
       setConnected(false);
-      setAutoConnect(false);
     }
   };
 
+  // Auto-connect on mount
   useEffect(() => {
-    if (autoConnect) {
-      const cleanup = connectToNode();
-      return cleanup;
-    }
-  }, [autoConnect, port]);
+    const cleanup = connectToNode();
+    return cleanup;
+  }, [port]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -72,20 +84,60 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
 
   const updateHeadState = (message: HydraMessage) => {
     switch (message.tag) {
+      case 'Greetings':
+        // Sync state from Greetings message
+        if (message.headStatus) {
+          const status = message.headStatus;
+          if (status === 'Idle') {
+            setHeadState('Idle');
+          } else if (status === 'Initializing') {
+            setHeadState('Initializing');
+            setHasInitialized(true);
+          } else if (status === 'Open') {
+            setHeadState('Open');
+            setHasInitialized(true);
+            setHasCommitted(true);
+          } else if (status === 'Closed') {
+            setHeadState('Closed');
+            setHasInitialized(true);
+            setHasCommitted(true);
+            setHasClosed(true);
+          } else if (status === 'Final') {
+            setHeadState('Finalized');
+            setHasInitialized(true);
+            setHasCommitted(true);
+            setHasClosed(true);
+          }
+        }
+        break;
       case 'HeadIsInitializing':
         setHeadState('Initializing');
+        setHasInitialized(true);
+        break;
+      case 'Committed':
+        setHasCommitted(true);
         break;
       case 'HeadIsOpen':
         setHeadState('Open');
+        setHasInitialized(true);
+        setHasCommitted(true);
         break;
       case 'HeadIsClosed':
         setHeadState('Closed');
+        setHasClosed(true);
         break;
       case 'HeadIsFinalized':
         setHeadState('Finalized');
         break;
       case 'HeadIsAborted':
         setHeadState('Aborted');
+        // Reset states on abort
+        setHasInitialized(false);
+        setHasCommitted(false);
+        setHasClosed(false);
+        break;
+      case 'ReadyToFanout':
+        setHeadState('Ready to Fanout');
         break;
     }
   };
@@ -111,6 +163,11 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
 
   const clearMessages = () => {
     setMessages([]);
+    // Reset workflow states when clearing messages
+    setHasInitialized(false);
+    setHasCommitted(false);
+    setHasClosed(false);
+    setHeadState('Idle');
   };
 
   const getMessageIcon = (message: HydraMessage) => {
@@ -146,78 +203,81 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
         </div>
       </div>
 
-      {/* Connection Control */}
-      <div className="mb-4">
-        {!connected ? (
-          <button
-            onClick={() => setAutoConnect(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-          >
-            <Plug className="w-4 h-4" />
-            Connect to WebSocket
-          </button>
-        ) : (
-          <button
-            onClick={disconnectFromNode}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-          >
-            <PlugZap className="w-4 h-4" />
-            Disconnect
-          </button>
-        )}
-      </div>
-
-      {connectionError && (
+      {/* Connection Status Info */}
+      {!connected && (
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
-          <p className="font-semibold">Connection Error</p>
-          <p className="mt-1">{connectionError}</p>
-          <p className="mt-2 text-xs">Start the {nodeId} node first, then click "Connect to WebSocket"</p>
+          <p className="font-semibold">Waiting for connection...</p>
+          <p className="mt-1">Make sure the {nodeId} node is running. Will auto-reconnect every 3 seconds.</p>
+        </div>
+      )}
+
+      {/* Commit Info */}
+      {connected && headState === 'Initializing' && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-300 rounded text-blue-800 text-sm">
+          <p className="font-semibold">Head is Initializing - Commit Required</p>
+          <p className="mt-1">Use the "Commit Alice/Bob" buttons in the Commit UTxOs section below.</p>
         </div>
       )}
 
       {/* Command Buttons */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
         <button
           onClick={() => handleCommand(() => clientRef.current?.init())}
-          disabled={!connected}
+          disabled={!connected || hasInitialized}
           className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title={hasInitialized ? "Head already initialized" : "Initialize head"}
         >
           Init
         </button>
         <button
-          onClick={() => handleCommand(() => clientRef.current?.commit({}))}
-          disabled={!connected}
-          className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
-        >
-          Commit
-        </button>
-        <button
           onClick={() => handleCommand(() => clientRef.current?.close())}
-          disabled={!connected}
+          disabled={!connected || headState !== 'Open'}
           className="px-3 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title={headState !== 'Open' ? "Head must be open" : "Close head"}
         >
           Close
         </button>
         <button
           onClick={() => handleCommand(() => clientRef.current?.fanout())}
-          disabled={!connected}
+          disabled={!connected || headState !== 'Ready to Fanout'}
           className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title={headState !== 'Ready to Fanout' ? "Wait for ReadyToFanout message" : "Fanout funds"}
         >
           Fanout
         </button>
         <button
           onClick={() => handleCommand(() => clientRef.current?.abort())}
-          disabled={!connected}
+          disabled={!connected || headState === 'Open' || headState === 'Closed' || headState === 'Finalized'}
           className="px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title={headState === 'Open' || headState === 'Closed' ? "Cannot abort after head is open" : "Abort initialization"}
         >
           Abort
         </button>
         <button
-          onClick={() => handleCommand(() => clientRef.current?.getUTxO())}
+          onClick={() => handleCommand(() => clientRef.current?.recover())}
           disabled={!connected}
-          className="px-3 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          className="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title="Recover head state from persistence"
         >
-          Get UTxO
+          Recover
+        </button>
+        <button
+          onClick={() => {
+            const decommitTx = prompt('Enter decommit transaction JSON:');
+            if (decommitTx) {
+              try {
+                const tx = JSON.parse(decommitTx);
+                handleCommand(() => clientRef.current?.decommit(tx));
+              } catch (e) {
+                alert('Invalid JSON format');
+              }
+            }
+          }}
+          disabled={!connected || headState !== 'Open'}
+          className="px-3 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
+          title={headState !== 'Open' ? "Head must be open" : "Decommit UTxO from head"}
+        >
+          Decommit
         </button>
       </div>
 
@@ -231,9 +291,9 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
             type="text"
             value={customCommand}
             onChange={(e) => setCustomCommand(e.target.value)}
-            placeholder='{"tag": "GetUTxO"}'
+            placeholder='{"tag": "Recover"}'
             disabled={!connected}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 text-sm"
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 text-sm text-gray-900"
           />
           <button
             onClick={handleCustomCommand}
@@ -252,7 +312,7 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
           <h4 className="text-sm font-semibold text-gray-700">Messages ({messages.length})</h4>
           <button
             onClick={clearMessages}
-            className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+            className="text-sm text-gray-800 hover:text-gray-900 flex items-center gap-1 font-medium"
           >
             <Trash2 className="w-4 h-4" />
             Clear
@@ -260,7 +320,7 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
         </div>
         <div className="max-h-64 overflow-y-auto p-3 space-y-2">
           {messages.length === 0 ? (
-            <div className="text-center text-gray-500 text-sm py-4">
+            <div className="text-center text-gray-700 text-sm py-4 font-medium">
               No messages yet. Connect to start receiving messages.
             </div>
           ) : (
@@ -272,7 +332,7 @@ export default function HydraHeadControl({ nodeId, port }: HydraHeadControlProps
                 {getMessageIcon(message)}
                 <div className="flex-1 font-mono">
                   <div className="font-semibold text-gray-800">{message.tag}</div>
-                  <pre className="text-gray-600 mt-1 overflow-x-auto">
+                  <pre className="text-gray-800 font-medium mt-1 overflow-x-auto">
                     {JSON.stringify(message, null, 2)}
                   </pre>
                 </div>
